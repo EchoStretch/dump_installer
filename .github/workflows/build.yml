@@ -1,0 +1,54 @@
+name: dump_installer
+
+on:
+  push:
+    paths-ignore:
+      - "**/*.md"
+      - "**/*.txt"
+  pull_request:
+    paths-ignore:
+      - "**/*.md"
+      - "**/*.txt"
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.ref }}-${{ github.event_name }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: |
+          sudo apt update -qq
+          sudo apt install -y build-essential clang-18 lld-18 xxd yasm nasm
+
+      - name: Install PS5 Payload SDK
+        run: |
+          wget -q https://github.com/ps5-payload-dev/pacbrew-repo/releases/latest/download/ps5-payload-dev.tar.gz
+          sudo tar xf ps5-payload-dev.tar.gz -C /
+
+      - name: Build dump_installer.elf
+        run: |
+          export PS5_PAYLOAD_SDK=/opt/ps5-payload-sdk
+          make -j$(nproc)
+
+      - name: Prepare release files
+        run: |
+          mkdir -p release/sce_sys
+          cp dump_installer.elf release/
+          cp homebrew.js release/ 2>/dev/null || true
+          cp sce_sys/icon0.png release/sce_sys/ 2>/dev/null || true
+          ls -R release
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dump_installer
+          path: release/*
+          if-no-files-found: error
