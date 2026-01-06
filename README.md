@@ -27,7 +27,7 @@ Run homebrew apps on your PS5 using the Kstuff, Websrv payloads and Homebrew Lau
 
 ### 📌 Example Folder Structure
 
-`/data/homebrew/DumpInstaller/`, `/mnt/usb0/homebrew/DumpInstaller/` or `/mnt/ext0/homebrew/DumpInstaller/`
+`/data/homebrew/dump_installer/`, `/mnt/usb0/homebrew/dump_installer/` or `/mnt/ext0/homebrew/dump_installer/`
    - `dump_installer.elf`
    - `homebrew.js`
    - `sce_sys/icon0.png`
