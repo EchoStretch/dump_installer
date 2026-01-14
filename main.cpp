@@ -11,6 +11,7 @@
 #include <sys/param.h>
 #include <errno.h>
 #include <limits.h>
+#include <sqlite3.h>
 
 #define IOVEC_ENTRY(x) { (void*)(x), (x) ? strlen(x) + 1 : 0 }
 #define IOVEC_SIZE(x)  (sizeof(x) / sizeof(struct iovec))
@@ -108,6 +109,103 @@ static int copy_dir(const char* src, const char* dst) {
     }
     closedir(d);
     return 0;
+}
+
+// ---------------- COPY appmeta ----------------
+static int is_appmeta_file(const char* name) {
+    if (!strcasecmp(name, "param.json") ||
+        !strcasecmp(name, "param.sfo"))
+        return 1;
+
+    const char* ext = strrchr(name, '.');
+    if (!ext) return 0;
+
+    return !strcasecmp(ext, ".png") ||
+           !strcasecmp(ext, ".dds") ||
+           !strcasecmp(ext, ".at9");
+}
+
+static int copy_sce_sys_to_appmeta(const char* src, const char* title_id) {
+    char dst[PATH_MAX];
+    snprintf(dst, sizeof(dst), "/user/appmeta/%s", title_id);
+
+    mkdir("/user/appmeta", 0777);
+    mkdir(dst, 0755);
+
+    DIR* d = opendir(src);
+    if (!d) return -1;
+
+    struct dirent* e;
+    char ss[PATH_MAX], dd[PATH_MAX];
+    struct stat st;
+
+    while ((e = readdir(d))) {
+        if (!strcmp(e->d_name, ".") || !strcmp(e->d_name, ".."))
+            continue;
+
+        if (!is_appmeta_file(e->d_name))
+            continue;
+
+        snprintf(ss, sizeof(ss), "%s/%s", src, e->d_name);
+        snprintf(dd, sizeof(dd), "%s/%s", dst, e->d_name);
+
+        if (stat(ss, &st) != 0 || !S_ISREG(st.st_mode))
+            continue;
+
+        FILE* fs = fopen(ss, "rb");
+        if (!fs) continue;
+
+        FILE* fd = fopen(dd, "wb");
+        if (!fd) { fclose(fs); continue; }
+
+        char buf[8192];
+        size_t n;
+        while ((n = fread(buf, 1, sizeof(buf), fs)) > 0)
+            fwrite(buf, 1, n, fd);
+
+        fclose(fd);
+        fclose(fs);
+    }
+
+    closedir(d);
+    return 0;
+}
+
+// ---------------- Get Icon Sound ----------------
+static int update_snd0info(const char* title_id) {
+    sqlite3* db = NULL;
+    sqlite3_stmt* stmt = NULL;
+    int ret = -1;
+
+    char db_path[] = "/system_data/priv/mms/app.db";
+
+    const char* sql =
+        "UPDATE tbl_contentinfo "
+        "SET snd0info = '/user/appmeta/' || ?1 || '/snd0.at9' "
+        "WHERE titleId = ?1;";
+
+    if (sqlite3_open(db_path, &db) != SQLITE_OK) {
+        printf("[snd0] Open failed: %s\n", sqlite3_errmsg(db));
+        goto out;
+    }
+
+    if (sqlite3_prepare_v2(db, sql, -1, &stmt, NULL) != SQLITE_OK) {
+        printf("[snd0] Prepare failed: %s\n", sqlite3_errmsg(db));
+        goto out;
+    }
+
+    sqlite3_bind_text(stmt, 1, title_id, -1, SQLITE_STATIC);
+
+    if (sqlite3_step(stmt) != SQLITE_DONE) {
+        printf("[snd0] Step failed: %s\n", sqlite3_errmsg(db));
+    }
+
+    ret = sqlite3_changes(db);
+
+out:
+    if (stmt) sqlite3_finalize(stmt);
+    if (db) sqlite3_close(db);
+    return ret;
 }
 
 // ---------------- JSON HELPER ----------------
@@ -312,8 +410,8 @@ int main(void) {
     char mount_lnk_path[PATH_MAX];
     char param_json_path[PATH_MAX];
 
-    notify("Welcome To Dump Installer 1.00 Beta");
-    printf("Welcome To Dump Installer 1.00 Beta\n");
+    notify("Welcome To Dump Installer 1.01 Beta");
+    printf("Welcome To Dump Installer 1.01 Beta\n");
 
     if (!getcwd(cwd, sizeof(cwd))) {
         printf("Error: Unable to determine working directory\n");
@@ -340,7 +438,6 @@ int main(void) {
     mkdir(system_ex_app, 0755);
 
     if (is_mounted(system_ex_app)) {
-        printf("Removing existing mount: %s\n", system_ex_app);
         unmount(system_ex_app, 0);
     }
 
@@ -365,6 +462,8 @@ int main(void) {
 
     copy_dir(src_sce_sys, user_sce_sys);
 
+    copy_sce_sys_to_appmeta(src_sce_sys, title_id);
+	
     sceAppInstUtilInitialize();
     if (sceAppInstUtilAppInstallTitleDir(title_id, "/user/app/", 0)) {
         notify("Application install failed");
@@ -378,9 +477,15 @@ int main(void) {
     if (f) {
         fprintf(f, "%s", cwd);
         fclose(f);
-        printf("Mount link created: %s\n", mount_lnk_path);
     }
 
+    notify("Fixing Config, please wait...");
+    printf("Fixing Config, please wait...\n");
+	
+    //sleep before trying to edit app.db
+    sleep(3);
+    update_snd0info(title_id);
+	
     notify("%s installed and ready to use!", title_id);
     printf("%s installed and ready to use!\n", title_id);
     printf("The icon should now appear on the home screen.\n");
