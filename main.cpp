@@ -473,8 +473,8 @@ int main(void) {
     char user_sce_sys[PATH_MAX];
     char mount_lnk_path[PATH_MAX];
 
-    notify("Dump Installer 1.06 Beta - UFS Support");
-    printf("Dump Installer 1.06 Beta - UFS Support\n");
+    notify("Dump Installer 1.02 Beta - UFS Support");
+    printf("Dump Installer 1.02 Beta - UFS Support\n");
 
     if (!getcwd(cwd, sizeof(cwd))) {
         printf("Error: Unable to determine working directory\n");
