@@ -367,10 +367,7 @@ static bool detect_is_ufs(const char* file_path) {
 static bool is_image_file(const char* name) {
     const char* dot = strrchr(name, '.');
     if (!dot) return false;
-    return !strcasecmp(dot, ".ffpkg") ||
-           !strcasecmp(dot, ".img")   ||
-           !strcasecmp(dot, ".dat")   ||
-           !strcasecmp(dot, ".pfs");
+    return !strcasecmp(dot, ".ffpkg");
 }
 
 static int find_image_in_dir(const char* dir, char* out, size_t out_sz, bool* is_ufs_out) {
