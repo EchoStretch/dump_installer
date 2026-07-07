@@ -17,9 +17,11 @@
 #include "exfat_mount.h"
 #include "install.h"
 
+#include <ps5/kernel.h>
+
 int sceAppInstUtilInitialize(void);
-int sceAppInstUtilAppInstallTitleDir(const char* title_id, const char* install_path, void* reserved);
-int sceAppInstUtilAppInstallAll(void* reserved);
+int sceAppInstUtilAppInstallAll(void*);
+int sceAppInstUtilAppUnInstall(const char*);
 
 #define SHADOWMOUNTPLUS_NOAUTOMOUNT "/data/.kstuff_noautomount"
 #define SHADOWMOUNTPLUS_DIR "/data/shadowmount"
@@ -83,6 +85,42 @@ static int add_shadowmountplus_link(const char* link_path) {
     return ret;
 }
 
+static int install_app(const char* title_id, const char* dir) {
+    int (*sceAppInstUtilAppInstallTitleDir)(const char*, const char*, void*) = 0;
+    const char* nid = "Wudg3Xe3heE";
+    uint32_t handle;
+    int ret;
+
+	if (!kernel_dynlib_handle(-1, "libSceAppInstUtil.sprx", &handle)) {
+		sceAppInstUtilAppInstallTitleDir =
+			(int (*)(const char*, const char*, void*))
+			(uintptr_t)kernel_dynlib_resolve(-1, handle, nid);
+	}
+
+    if (sceAppInstUtilAppInstallTitleDir) {
+        ret = sceAppInstUtilAppInstallTitleDir(title_id, dir, 0);
+        if (ret == 0) {
+            printf("Used AppInstallTitleDir\n");
+            return 0;
+        }
+
+        printf("AppInstallTitleDir failed: 0x%X\n", ret);
+    } else {
+        printf("AppInstallTitleDir not available\n");
+    }
+
+    // Fallback → required for 12.00+
+	printf("Falling back to AppInstallAll...\n");
+    ret = sceAppInstUtilAppInstallAll(0);
+    if (ret == 0) {
+        printf("Used AppInstallAll\n");
+        return 0;
+    }
+
+    printf("AppInstallAll failed: 0x%X\n", ret);
+    return ret;
+}
+
 int main(void) {
     char cwd[PATH_MAX];
     char title_id[32] = {};
@@ -92,7 +130,7 @@ int main(void) {
     char src_sce_sys[PATH_MAX];
     char mount_lnk_path[PATH_MAX];
 	
-    notify("Dump Installer 1.06 Beta - PFS + UFS + exFAT");
+    notify("Dump Installer 1.07 Beta - PFS + UFS + exFAT");
 
     if (!getcwd(cwd, sizeof(cwd))) {
         printf("Error: Unable to determine working directory\n");
@@ -328,9 +366,6 @@ int main(void) {
         return -1;
     }
 
-    notify("Installing %s, please wait...", title_id);
-    //printf("Installing %s, please wait...\n", title_id);
-
     snprintf(system_ex_app, sizeof(system_ex_app), "/system_ex/app/%s", title_id);
     mkdir(system_ex_app, 0755);
 
@@ -352,6 +387,13 @@ int main(void) {
         return -1;
     }
 
+    notify("Fixing Config, please wait...");
+
+	sceAppInstUtilInitialize();
+	sceAppInstUtilAppUnInstall(title_id);
+    update_trophy(title_id, src_sce_sys);
+    update_snd0info(title_id);
+	
     char test_sfo[MAX_PATH];
     snprintf(test_sfo, sizeof(test_sfo), "%s/sce_sys/param.sfo", system_ex_app);
     /*if (access(test_sfo, F_OK) == 0) {
@@ -375,47 +417,12 @@ int main(void) {
 
     copy_sce_sys_to_appmeta(src_sce_sys, title_id);
 
-    /*sceAppInstUtilInitialize();
-    int install_ret = sceAppInstUtilAppInstallTitleDir(title_id, "/user/app/", 0);
-    if (install_ret != 0) {
-        notify("sceAppInstUtilAppInstallTitleDir failed: ret=0x%08x errno=%d (%s)",
-               install_ret, errno, strerror(errno));
-        printf("Install failed: ret=0x%08x errno=%d (%s)\n",
-               install_ret, errno, strerror(errno));
-        if (strlen(mount_point) > 0) {
-            if (is_ufs) unmount_ufs(mount_point);
-            else if (is_pfs) unmount_pfs(mount_point);
-			else if (is_pfsc) unmount_pfsc(mount_point);
-            else if (is_exfat) unmount_exfat(mount_point);
-        }
+    notify("Installing %s, please wait...", title_id);
+	
+	if (install_app(title_id, "/user/app/")) {
+        notify("Application install failed");
+        printf("Error: Application install failed\n");
         return -1;
-    }*/
-
-    sceAppInstUtilInitialize();
-
-    int install_ret = sceAppInstUtilAppInstallTitleDir(title_id, "/user/app/", 0);
-
-    if (install_ret != 0) {
-        notify("TitleDir failed: 0x%08x", install_ret);
-        printf("TitleDir failed: 0x%08x\n", install_ret);
-        printf("Falling back to AppInstallAll...\n");
-
-        install_ret = sceAppInstUtilAppInstallAll(0);
-
-        if (install_ret != 0) {
-            notify("AppInstallAll failed: 0x%08x", install_ret);
-            printf("AppInstallAll failed: 0x%08x\n", install_ret);
-
-            if (strlen(mount_point) > 0) {
-                if (is_ufs) unmount_ufs(mount_point);
-                else if (is_pfs) unmount_pfs(mount_point);
-				else if (is_pfsc) unmount_pfsc(mount_point);
-                else if (is_exfat) unmount_exfat(mount_point);
-            }
-            return -1;
-        } else {
-            notify("Fallback succeeded (AppInstallAll)");
-        }
     }
 	
     snprintf(mount_lnk_path, sizeof(mount_lnk_path), "/user/app/%s/mount.lnk", title_id);
@@ -425,13 +432,6 @@ int main(void) {
         fprintf(f, "%s", cwd);
         fclose(f);
     }
-
-    notify("Fixing Config, please wait...");
-
-    update_trophy(title_id, src_sce_sys);
-	
-    sleep(3);
-    update_snd0info(title_id);
 
     /*if (strlen(mount_point) > 0) {
         notify("%s kept mounted at %s for launch",
