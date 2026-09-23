@@ -137,6 +137,8 @@ int main(void) {
         return -1;
     }
 
+    snprintf(src_sce_sys, sizeof(src_sce_sys), "%s/sce_sys", cwd);
+
     char image_file[MAX_PATH] = {};
     bool is_ufs = false;
     bool is_pfs = false;
@@ -367,7 +369,22 @@ int main(void) {
     }
 
     snprintf(system_ex_app, sizeof(system_ex_app), "/system_ex/app/%s", title_id);
-    mkdir(system_ex_app, 0755);
+
+    // /system_ex is read-only at boot; remount RW before creating/mounting the app dir
+    if (remount_system_ex() != 0) {
+        notify("remount_system_ex failed (errno %d)", errno);
+    }
+
+    if (mkdir(system_ex_app, 0755) != 0 && errno != EEXIST) {
+        notify("Failed to create %s (errno %d: %s)", system_ex_app, errno, strerror(errno));
+        if (strlen(mount_point) > 0) {
+            if (is_ufs) unmount_ufs(mount_point);
+            else if (is_pfs) unmount_pfs(mount_point);
+            else if (is_pfsc) unmount_pfsc(mount_point);
+            else if (is_exfat) unmount_exfat(mount_point);
+        }
+        return -1;
+    }
 
     if (is_mounted(system_ex_app)) {
         unmount(system_ex_app, 0);
@@ -403,8 +420,6 @@ int main(void) {
     }*/
 
     //notify("nullfs mounted OK → %s overlays %s", system_ex_app, nullfs_src);
-
-    remount_system_ex();
 
     snprintf(user_app_dir, sizeof(user_app_dir), "/user/app/%s", title_id);
     mkdir(user_app_dir, 0755);
